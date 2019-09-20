@@ -7,33 +7,48 @@ from selenium.common import exceptions
 import xlsxwriter
 from textblob import TextBlob
 import matplotlib.pyplot as plt
-import PyPDF2
-from TexSoup import TexSoup
-import re
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfpage import PDFPage
+import yaml
+from io import StringIO
 
-# Returns a dictionary of the words that have been applied to with the value the number of occurrences
+URL = "https://nucareers.northeastern.edu/students/student-login.htm"
+
+
+# Returns a dictionary of the words that have been applied to with the value being the number of occurrences
 def get_my_jobs():
     # Login to NUCareers
-    url = "https://nucareers.northeastern.edu/students/student-login.htm"
     browser = webdriver.Chrome("C:\\Program Files (x86)\\chromedriver_win32\\chromedriver.exe")
     browser.maximize_window()
-    browser.get(url)
+    browser.get(URL)
     WebDriverWait(browser, 5).until(
         ec.presence_of_element_located((By.CLASS_NAME, "btn-primary"))
     )
     browser.find_element_by_css_selector('.btn.btn-primary.btn-large').click()
 
-    browser.find_element_by_id('username').send_keys('****')
-    browser.find_element_by_id('password').send_keys('******')
-    browser.find_element_by_css_selector('.btn-submit').click()
+    # Read and use username and password from login.yaml
+    with open("login.yaml", 'r') as login:
+        try:
+            login_info = yaml.safe_load(login)
+            username = login_info['username']
+            password = login_info['password']
+            browser.find_element_by_id('username').send_keys(username)
+            browser.find_element_by_id('password').send_keys(password)
+            browser.find_element_by_css_selector('.form-button').click()
+        except yaml.YAMLError as exc:
+            print(exec)
+            exit(1)
 
     browser.find_element_by_xpath("//a[@href='/myAccount/co-op/jobs.htm']").click()
+    # The wait is required so the page can run the javascript
     WebDriverWait(browser, 5).until(
         ec.presence_of_element_located((By.LINK_TEXT, "Applied To"))
     )
     browser.find_element_by_xpath("//a[contains(text(),'Applied To')]").click()
     WebDriverWait(browser, 20).until(
-        ec.presence_of_element_located((By.LINK_TEXT, "Cancel Application"))
+        ec.presence_of_element_located((By.LINK_TEXT, "view"))
     )
 
     html = browser.page_source
@@ -42,13 +57,17 @@ def get_my_jobs():
     companies = []
     skills = ['python', 'c++', 'experience', 'java', 'c#', 'unity']
 
+    # TODO: Have this be read from the yaml
+    term = "2020 - Spring"
+
     # Gathers the company names
     for row in soup.findAll('table')[0].tbody.findAll('tr'):
-        job = [row.findAll('td')[4].text, row.findAll('td')[3].text, row.findAll('td')[10].text]
-        companies.append([row.findAll('td')[4].text.split()])
-        jobs.append(job)
+        if row.findAll('td')[1].text == term:
+            job = [row.findAll('td')[4].text, row.findAll('td')[3].text, row.findAll('td')[10].text]
+            companies.append([row.findAll('td')[4].text.split()])
+            jobs.append(job)
 
-    descriptions = description(browser)
+    descriptions = description(browser, len(companies))
     browser.close()
     my_profile = create_common_words(descriptions, companies, 3)
 
@@ -63,10 +82,9 @@ def get_my_jobs():
 
 def apply(profile_list, location_list):
     # Opens a browser and navigates to the right page
-    url = "https://nucareers.northeastern.edu/students/student-login.htm"
     browser = webdriver.Chrome("C:\\Program Files (x86)\\chromedriver_win32\\chromedriver.exe")
     browser.maximize_window()
-    browser.get(url)
+    browser.get(URL)
     WebDriverWait(browser, 5).until(
         ec.presence_of_element_located((By.CLASS_NAME, "btn-primary"))
     )
@@ -179,30 +197,34 @@ def write_file(applications):
     book.close()
 
 
-def description(browser):
-    this_description = []
+def description(browser, num_jobs):
+    job_descriptions = []
     for job in browser.find_elements_by_link_text("view"):
+        if num_jobs == 0:
+            break
         job.click()
         browser.find_element_by_link_text("new tab").click()
         browser.switch_to.window(browser.window_handles[1])
         html = browser.page_source
         soup = BeautifulSoup(html, "html.parser")
         try:
-            for row in soup.findAll('table')[2].tbody.findAll('tr')[12].findAll('td', {"width": "75%"}):
-                descript = row.text
-                descript = descript.replace("\n", "")
-                descript = descript.replace("\t", "")
-                descript = descript.replace("\xa0", " ")
-                descript = TextBlob(descript)
-                this_description.append(descript.noun_phrases)
+            job_description = soup.findAll('table')[2].tbody.findAll('tr')[11]
+            if job_description.td.text.strip() == 'Job Description:':
+                this_description = job_description.find('td', {'width': '75%'}).text
+                this_description = this_description.replace("\n", "")
+                this_description = this_description.replace("\t", "")
+                this_description = this_description.replace("\xa0", " ")
+                this_description = TextBlob(this_description)
+                job_descriptions.append(this_description.noun_phrases)
         except IndexError:
             pass
         browser.close()
         browser.switch_to.window(browser.window_handles[0])
-    return this_description
+        num_jobs -= 1
+    return job_descriptions
 
 
-def create_common_words(nouns, names, number):
+def create_common_words(nouns, names, cutoff):
     # Words takes all the words
     words = []
     # Final takes the words and counts the usages
@@ -212,36 +234,47 @@ def create_common_words(nouns, names, number):
                  'wide range']
 
     for job in nouns:
-        for word in job:
-            words.append(word)
+        if cutoff > 1:
+            for word in job:
+                words.append(word)
+        else:
+            words.append(job)
 
     for this_word in words:
-        if words.count(this_word) > number and this_word not in final and this_word not in names and this_word not in bad_words:
+        if words.count(this_word) > cutoff and this_word not in final and this_word not in names and this_word not in bad_words:
             final[this_word] = words.count(this_word)
 
+    print(final)
     return final
 
 
-def latex_scraper():
-    resume = open("Kuss Global Resume\\Kuss_GlobalResume.tex")
-    soup = TexSoup(resume)
-    soup = str(soup)
-    text = re.search('{(.+?)]', soup)
-    print(text)
-
-
 def resume_scraper(resume):
-    my_resume = []
-    pdfFileObj = open('Kuss_Global_Resume.pdf', 'rb')
-    pdfReader = PyPDF2.PdfFileReader(pdfFileObj)
-    pageObj = pdfReader.getPage(0)
-    data = pageObj.extractText()
-    pdfFileObj.close()
-    data = TextBlob(data).noun_phrases
-    print(data)
+    profile = []
+    rsrcmgr = PDFResourceManager()
+    retstr = StringIO()
+    codec = 'utf-8'
+    laparams = LAParams()
+    device = TextConverter(rsrcmgr, retstr, codec=codec, laparams=laparams)
+    fp = open(resume, 'rb')
+    interpreter = PDFPageInterpreter(rsrcmgr, device)
+    password = ""
+    maxpages = 0
+    caching = True
+    pagenos = set()
+
+    for page in PDFPage.get_pages(fp, pagenos, maxpages=maxpages, password=password, caching=caching,
+                                  check_extractable=True):
+        interpreter.process_page(page)
+
+    text = retstr.getvalue()
+
+    fp.close()
+    device.close()
+    retstr.close()
+    data = TextBlob(text).noun_phrases
     for noun in data:
-        my_resume.append(noun)
-    return data
+        profile.append(noun)
+    return create_common_words(profile, [], 0)
 
 
 # Creates a pie chart of a dictionary
@@ -265,17 +298,6 @@ def create_plot(data):
 
 
 if __name__ == '__main__':
-    # latex_scraper()
-    # pdf_file = open('Resume Official Online.pdf', 'rb')
-    # read_pdf = PyPDF2.PdfFileReader(pdf_file)
-    # page = read_pdf.getPage(0)
-    # page_content = page.extractText()
-    # print(page_content.encode('utf-8').strip())
-    # profile = get_my_jobs()
-    # create_plot(profile)
-    # print(profile)
-    profile = []
-    locations = ['Boston', 'Burlington', 'Seattle', 'Tokyo', 'Berlin', 'Munich', 'San Francisco', 'Redwood', 'Palo Alto'
-                 'Waltham', 'Cambridge', 'Los Angeles', 'Chicago', 'Singapore', 'Hong Kong']
-    jobs = apply(profile, locations)
+    profile = {**resume_scraper('Kuss_Resume.pdf'), **get_my_jobs()}
+    # jobs = apply(profile, locations)
     # create_plot(jobs)

@@ -1,9 +1,8 @@
 # Northeastern University Careers Applicator
 
-This is still a rough work in progress but basically you can apply to some
-jobs and it will go through the jobs you have already applied to and get 
-the most common words used throughout the job description. It will make a profile
-from these words and then use that to apply to future jobs.
-
-There is still a lot that needs to be done and I don't have access to NUCareers at
-the moment sooo we will see.
+There are several methods that can be called within the main function. You will see that
+the first line of the main calls `setup()`. `setup()` is used by the program to create some global variables
+that will be used when logging into NUCareers. Inside `login.yaml` enter your username and password as well
+as your chrome driver. Also included in the login should be the name of your resume in pdf format which should
+be placed in the same directory as this project. Finally, enter your time period when looking for co-ops. This
+should follow the pattern `Year - Season`. If none is supplied it will default to `2020 - Spring`.

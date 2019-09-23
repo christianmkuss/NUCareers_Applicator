@@ -4,7 +4,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.common import exceptions
-import xlsxwriter
 from textblob import TextBlob
 import matplotlib.pyplot as plt
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
@@ -15,12 +14,33 @@ import yaml
 from io import StringIO
 
 URL = "https://nucareers.northeastern.edu/students/student-login.htm"
+DRIVER = ''
+USERNAME = '*******'
+PASSWORD = '****'
+TIME_PERIOD = '2020 - Spring'
+RESUME = ''
+
+
+def setup():
+    global DRIVER, USERNAME, PASSWORD, TIME_PERIOD, RESUME
+    with open("login.yaml", 'r') as login:
+        try:
+            login_info = yaml.safe_load(login)
+            USERNAME = login_info['username']
+            PASSWORD = login_info['password']
+            DRIVER = login_info['driver']
+            TIME_PERIOD = login_info['time_period']
+            RESUME = login_info['resume_name']
+        except yaml.YAMLError as exc:
+            print('Unable to parse login file. Please make sure you have login.yaml in the root directory')
+            print(exec)
+            exit(1)
 
 
 # Returns a dictionary of the words that have been applied to with the value being the number of occurrences
 def get_my_jobs():
     # Login to NUCareers
-    browser = webdriver.Chrome("C:\\Program Files (x86)\\chromedriver_win32\\chromedriver.exe")
+    browser = webdriver.Chrome(DRIVER)
     browser.maximize_window()
     browser.get(URL)
     WebDriverWait(browser, 5).until(
@@ -28,18 +48,9 @@ def get_my_jobs():
     )
     browser.find_element_by_css_selector('.btn.btn-primary.btn-large').click()
 
-    # Read and use username and password from login.yaml
-    with open("login.yaml", 'r') as login:
-        try:
-            login_info = yaml.safe_load(login)
-            username = login_info['username']
-            password = login_info['password']
-            browser.find_element_by_id('username').send_keys(username)
-            browser.find_element_by_id('password').send_keys(password)
-            browser.find_element_by_css_selector('.form-button').click()
-        except yaml.YAMLError as exc:
-            print(exec)
-            exit(1)
+    browser.find_element_by_id('username').send_keys(USERNAME)
+    browser.find_element_by_id('password').send_keys(PASSWORD)
+    browser.find_element_by_css_selector('.form-button').click()
 
     browser.find_element_by_xpath("//a[@href='/myAccount/co-op/jobs.htm']").click()
     # The wait is required so the page can run the javascript
@@ -57,12 +68,9 @@ def get_my_jobs():
     companies = []
     skills = ['python', 'c++', 'experience', 'java', 'c#', 'unity']
 
-    # TODO: Have this be read from the yaml
-    term = "2020 - Spring"
-
     # Gathers the company names
     for row in soup.findAll('table')[0].tbody.findAll('tr'):
-        if row.findAll('td')[1].text == term:
+        if row.findAll('td')[1].text == TIME_PERIOD:
             job = [row.findAll('td')[4].text, row.findAll('td')[3].text, row.findAll('td')[10].text]
             companies.append([row.findAll('td')[4].text.split()])
             jobs.append(job)
@@ -82,7 +90,7 @@ def get_my_jobs():
 
 def apply(profile_list, location_list):
     # Opens a browser and navigates to the right page
-    browser = webdriver.Chrome("C:\\Program Files (x86)\\chromedriver_win32\\chromedriver.exe")
+    browser = webdriver.Chrome(DRIVER)
     browser.maximize_window()
     browser.get(URL)
     WebDriverWait(browser, 5).until(
@@ -90,8 +98,8 @@ def apply(profile_list, location_list):
     )
     browser.find_element_by_css_selector('.btn.btn-primary.btn-large').click()
 
-    browser.find_element_by_id('username').send_keys('*****')
-    browser.find_element_by_id('password').send_keys('******')
+    browser.find_element_by_id('username').send_keys(USERNAME)
+    browser.find_element_by_id('password').send_keys(PASSWORD)
     browser.find_element_by_css_selector('.btn-submit').click()
 
     browser.find_element_by_xpath("//a[@href='/myAccount/co-op/jobs.htm']").click()
@@ -168,35 +176,6 @@ def apply(profile_list, location_list):
     return all_words
 
 
-def write_all_job(applications):
-    book = xlsxwriter.Workbook('MyApplications.xlsx')
-    sh = book.add_worksheet()
-
-    row = 0
-    col = 0
-
-    for word in applications:
-        sh.write(row, col, word)
-        sh.write(row, col + 1, applications[word])
-        row += 1
-    book.close()
-
-
-def write_file(applications):
-    book = xlsxwriter.Workbook('MyApplications.xlsx')
-    sh = book.add_worksheet()
-
-    row = 0
-    col = 0
-
-    for company, job, date in applications:
-        sh.write(row, col, company)
-        sh.write(row, col + 1, job)
-        sh.write(row, col + 2, date)
-        row += 1
-    book.close()
-
-
 def description(browser, num_jobs):
     job_descriptions = []
     for job in browser.find_elements_by_link_text("view"):
@@ -248,14 +227,14 @@ def create_common_words(nouns, names, cutoff):
     return final
 
 
-def resume_scraper(resume):
-    profile = []
+def resume_scraper():
+    resume_profile = []
     rsrcmgr = PDFResourceManager()
     retstr = StringIO()
     codec = 'utf-8'
     laparams = LAParams()
     device = TextConverter(rsrcmgr, retstr, codec=codec, laparams=laparams)
-    fp = open(resume, 'rb')
+    fp = open(RESUME, 'rb')
     interpreter = PDFPageInterpreter(rsrcmgr, device)
     password = ""
     maxpages = 0
@@ -273,8 +252,8 @@ def resume_scraper(resume):
     retstr.close()
     data = TextBlob(text).noun_phrases
     for noun in data:
-        profile.append(noun)
-    return create_common_words(profile, [], 0)
+        resume_profile.append(noun)
+    return create_common_words(resume_profile, [], 0)
 
 
 # Creates a pie chart of a dictionary
@@ -298,6 +277,7 @@ def create_plot(data):
 
 
 if __name__ == '__main__':
-    profile = {**resume_scraper('Kuss_Resume.pdf'), **get_my_jobs()}
+    setup()
+    profile = {**resume_scraper(), **get_my_jobs()}
     # jobs = apply(profile, locations)
     # create_plot(jobs)

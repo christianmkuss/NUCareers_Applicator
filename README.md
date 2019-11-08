@@ -6,3 +6,5 @@ that will be used when logging into NUCareers. Inside `login.yaml` enter your us
 as your chrome driver. Also included in the login should be the name of your resume in pdf format which should
 be placed in the same directory as this project. Finally, enter your time period when looking for co-ops. This
 should follow the pattern `Year - Season`. If none is supplied it will default to `2020 - Spring`.
+
+Still under construction
